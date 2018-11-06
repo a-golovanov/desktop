@@ -1,6 +1,7 @@
 import { DiffSelection, DiffSelectionType } from './diff'
 import { OcticonSymbol } from '../ui/octicons'
 import { assertNever } from '../lib/fatal-error'
+import { ConflictFileStatus } from './conflicts'
 
 /**
  * The status entry code as reported by Git.
@@ -32,13 +33,13 @@ export enum GitStatusEntry {
 
 /** The file status as represented in GitHub Desktop. */
 export enum AppFileStatus {
-  New,
-  Modified,
-  Deleted,
-  Copied,
-  Renamed,
-  Conflicted,
-  Resolved,
+  New = 'New',
+  Modified = 'Modified',
+  Deleted = 'Deleted',
+  Copied = 'Copied',
+  Renamed = 'Renamed',
+  Conflicted = 'Conflicted',
+  Resolved = 'Resolved',
 }
 
 /** The porcelain status for an ordinary changed entry */
@@ -62,7 +63,7 @@ type RenamedOrCopiedEntry = {
 }
 
 /** The porcelain status for an unmerged entry */
-type UnmergedEntry = {
+export type UnmergedEntry = {
   readonly kind: 'conflicted'
   /** the first character of the short code ("ours")  */
   readonly us: GitStatusEntry
@@ -171,7 +172,7 @@ export class WorkingDirectoryFileChange extends FileChange {
     status: AppFileStatus,
     public readonly selection: DiffSelection,
     oldPath?: string,
-    public readonly conflictMarkers: number = 0
+    public readonly conflictStatus: ConflictFileStatus | null = null
   ) {
     super(path, status, oldPath)
   }
@@ -191,7 +192,8 @@ export class WorkingDirectoryFileChange extends FileChange {
       this.path,
       this.status,
       selection,
-      this.oldPath
+      this.oldPath,
+      this.conflictStatus
     )
   }
 }

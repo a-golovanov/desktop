@@ -9,17 +9,15 @@ import {
   WorkingDirectoryFileChange,
   CommittedFileChange,
 } from '../../models/status'
-import { DiffSelection } from '../../models/diff'
+import { DiffSelection, ImageDiffType } from '../../models/diff'
 import {
   RepositorySectionTab,
-  Popup,
-  PopupType,
   Foldout,
   FoldoutType,
-  ImageDiffType,
   CompareAction,
   ICompareFormUpdate,
   MergeResultStatus,
+  SuccessfulMergeBannerState,
 } from '../app-state'
 import { AppStore } from '../stores/app-store'
 import { CloningRepository } from '../../models/cloning-repository'
@@ -28,7 +26,7 @@ import { Commit } from '../../models/commit'
 import { ExternalEditor } from '../../lib/editors'
 import { IAPIUser } from '../../lib/api'
 import { GitHubRepository } from '../../models/github-repository'
-import { ICommitMessage } from '../stores/git-store'
+import { ICommitMessage } from '../../models/commit-message'
 import { executeMenuItem } from '../../ui/main-process-proxy'
 import { AppMenu, ExecutableMenuItem } from '../../models/app-menu'
 import {
@@ -51,7 +49,7 @@ import {
 } from '../../lib/oauth'
 import { installCLI } from '../../ui/lib/install-cli'
 import { setGenericUsername, setGenericPassword } from '../generic-git-auth'
-import { RetryAction, RetryActionType } from '../retry-actions'
+import { RetryAction, RetryActionType } from '../../models/retry-actions'
 import { Shell } from '../shells'
 import { CloneRepositoryTab } from '../../models/clone-repository-tab'
 import { validatedRepositoryPath } from '../../lib/stores/helpers/validated-repository-path'
@@ -64,6 +62,7 @@ import { isGitRepository } from '../git'
 import { ApplicationTheme } from '../../ui/lib/application-theme'
 import { TipState } from '../../models/tip'
 import { RepositoryStateCache } from '../stores/repository-state-cache'
+import { Popup, PopupType } from '../../models/popup'
 
 /**
  * An error handler function.
@@ -472,6 +471,13 @@ export class Dispatcher {
   }
 
   /**
+   * Set the successful merge banner's state
+   */
+  public setSuccessfulMergeBannerState(state: SuccessfulMergeBannerState) {
+    return this.appStore._setSuccessfulMergeBannerState(state)
+  }
+
+  /**
    * Set the divering branch notification banner's visibility
    */
   public setDivergingBranchBannerVisibility(
@@ -589,6 +595,18 @@ export class Dispatcher {
     return this.appStore._mergeBranch(repository, branch, mergeStatus)
   }
 
+  public async abortMerge(repository: Repository) {
+    await this.appStore._abortMerge(repository)
+    await this.appStore._loadStatus(repository)
+  }
+
+  public createMergeCommit(
+    repository: Repository,
+    files: ReadonlyArray<WorkingDirectoryFileChange>
+  ) {
+    return this.appStore._createMergeCommit(repository, files)
+  }
+
   /** Record the given launch stats. */
   public recordLaunchStats(stats: ILaunchStats): Promise<void> {
     return this.appStore._recordLaunchStats(stats)
@@ -630,7 +648,10 @@ export class Dispatcher {
     if (gitFound || ignoreWarning) {
       this.appStore._openShell(path)
     } else {
-      this.appStore._showPopup({ type: PopupType.InstallGit, path })
+      this.appStore._showPopup({
+        type: PopupType.InstallGit,
+        path,
+      })
     }
   }
 
@@ -841,12 +862,12 @@ export class Dispatcher {
 
       case 'open-repository-from-url':
         const { url } = action
-        const repository = await this.openRepository(url)
+        const repository = await this.openOrCloneRepository(url)
         if (repository) {
           await this.handleCloneInDesktopOptions(repository, action)
         } else {
           log.warn(
-            `Open Repository from URL failed, did not find repository: ${url} - payload: ${JSON.stringify(
+            `Open Repository from URL failed, did not find or clone repository: ${url} - payload: ${JSON.stringify(
               action
             )}`
           )
@@ -977,7 +998,7 @@ export class Dispatcher {
     }
   }
 
-  private async openRepository(url: string): Promise<Repository | null> {
+  private async openOrCloneRepository(url: string): Promise<Repository | null> {
     const state = this.appStore.getState()
     const repositories = state.repositories
     const existingRepository = repositories.find(r => {
